@@ -24,6 +24,53 @@ jobs:
       - uses: cjdoris/julia-downgrade-compat-action@v1
         with:
           skip: Pkg,TOML,InteractiveUtils,Random,LinearAlgebra
-      - uses: julia-actions/cache@v2
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+
+      - name: Full Pkg Operations
+        run: |
+          julia -e '
+          import Pkg
+
+          try
+              Pkg.Registry.rm("General")
+          catch e
+              @warn "Failed to remove General registry: $e"
+          end
+          Pkg.Registry.add("General")
+          Pkg.Registry.update()
+
+          @info "Pkg.Registry.status() output:"
+          println(Pkg.Registry.status())
+          @info "Checking QuantumSavory in registry status:"
+          try
+              Pkg.Registry.status("QuantumSavory")
+          catch e
+              @error "Failed to get status for QuantumSavory from registry: $e"
+          end
+
+          Pkg.activate(".")
+          try
+              Pkg.instantiate()
+          catch e
+              @error "Failed to instantiate root project!" exception=(e, catch_backtrace())
+              rethrow(e)
+          end
+
+          Pkg.activate("test")
+          try
+              Pkg.instantiate()
+          catch e
+              @error "Failed to instantiate test environment!" exception=(e, catch_backtrace())
+              rethrow(e)
+          end
+
+          test_pkg_list = Pkg.installed()
+          if "QuantumSavory" in keys(test_pkg_list)
+              @info "QuantumSavory found in test environment: $(test_pkg_list["QuantumSavory"].version)"
+          else
+              @error "QuantumSavory NOT found in test environment after instantiation."
+              error("Critical: QuantumSavory not found.")
+          end
+
+          Pkg.build()
+          Pkg.test("QuantumSymbolics"; coverage=true) # No JULIA_NUM_THREADS matrix for downgrade.yml
+          '
