@@ -6,10 +6,7 @@ on:
   pull_request:
 
 concurrency:
-  # group by workflow and ref; the last slightly strange component ensures that for pull
-  # requests, we limit to 1 concurrent job, but for the master branch we don't
   group: ${{ github.workflow }}-${{ github.ref }}-${{ (github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main') || github.run_number }}
-  # Cancel intermediate builds, but only if it is a pull request build.
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 
 env:
@@ -50,11 +47,59 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v2
-      - uses: julia-actions/julia-buildpkg@v1
-      - uses: julia-actions/julia-runtest@v1
+
+      - name: Full Pkg Operations
+        run: |
+          julia -e '
+          import Pkg
+
+          try
+              Pkg.Registry.rm("General")
+          catch e
+              @warn "Failed to remove General registry: $e"
+          end
+          Pkg.Registry.add("General")
+          Pkg.Registry.update()
+
+          @info "Pkg.Registry.status() output:"
+          println(Pkg.Registry.status())
+          @info "Checking QuantumSavory in registry status:"
+          try
+              Pkg.Registry.status("QuantumSavory")
+          catch e
+              @error "Failed to get status for QuantumSavory from registry: $e"
+          end
+
+          Pkg.activate(".")
+          try
+              Pkg.instantiate()
+          catch e
+              @error "Failed to instantiate root project!" exception=(e, catch_backtrace())
+              rethrow(e)
+          end
+
+          Pkg.activate("test")
+          try
+              Pkg.instantiate()
+          catch e
+              @error "Failed to instantiate test environment!" exception=(e, catch_backtrace())
+              rethrow(e)
+          end
+
+          test_pkg_list = Pkg.installed()
+          if "QuantumSavory" in keys(test_pkg_list)
+              @info "QuantumSavory found in test environment: $(test_pkg_list["QuantumSavory"].version)"
+          else
+              @error "QuantumSavory NOT found in test environment after instantiation."
+              error("Critical: QuantumSavory not found.")
+          end
+
+          Pkg.build()
+          Pkg.test("QuantumSymbolics"; coverage=true, test_args=["--threads", "$(ENV["JULIA_NUM_THREADS"])"])
+          '
         env:
           JULIA_NUM_THREADS: ${{ matrix.threads }}
+
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v5
         with:
@@ -72,6 +117,6 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-docdeploy@v1
         env:
-          GKSwstype: nul # Fix for Plots with GR backend.
+          GKSwstype: nul
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
