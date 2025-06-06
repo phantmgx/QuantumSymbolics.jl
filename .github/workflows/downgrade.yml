@@ -73,4 +73,4 @@ jobs:
 
           Pkg.build()
           Pkg.test("QuantumSymbolics"; coverage=true) # No JULIA_NUM_THREADS matrix for downgrade.yml
-          '
+          ' 
